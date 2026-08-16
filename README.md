@@ -43,16 +43,21 @@ is testable without the GPU. Swap is behind the `Corpus`/`LLM` interfaces.
 
 ```bash
 cd backend
-python3 -m venv --without-pip .venv && .venv/bin/python get-pip.py   # runner has no ensurepip
+python3 -m venv .venv
 .venv/bin/pip install -e .
-# offline demo (no GPU needed):
-TUBEWIKI_OFFLINE=1 .venv/bin/python -m tubewiki.api
-# real: point at host Ollama (default endpoints are already the homelab's)
+
+# real: default endpoints point at the .78 Ollama box on the LAN
 .venv/bin/python -m tubewiki.api
+# or offline demo (no GPU / no LAN needed — deterministic stub):
+TUBEWIKI_OFFLINE=1 .venv/bin/python -m tubewiki.api
 ```
 
-Then open http://localhost:8000/ and POST a video to `/ingest` (or load the
-extension).
+Watch the startup log: `offline=False` means it reached Ollama; `offline=True` means
+it fell back to the stub. Then open http://localhost:8000/ and POST a video to
+`/ingest` (or load the extension — see `extension/`).
+
+> On a minimal Python without `ensurepip` (e.g. some CI runners), bootstrap pip first:
+> `python3 -m venv --without-pip .venv && curl -sS https://bootstrap.pypa.io/get-pip.py | .venv/bin/python`
 
 ## Tests
 
