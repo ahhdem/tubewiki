@@ -90,7 +90,11 @@ class OllamaLLM:
             timeout=180,
         )
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"].strip()
+        content = r.json()["choices"][0]["message"]["content"]
+        # Ollama routes qwen3 "thinking" to a separate `reasoning` field, but strip any
+        # inline <think> blocks defensively so they never leak into claims/concepts.
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        return content.strip()
 
     def choose_concept(self, title: str, transcript: str, existing_titles: list[str]) -> str:
         existing = "\n".join(f"- {t}" for t in existing_titles) or "(none yet)"

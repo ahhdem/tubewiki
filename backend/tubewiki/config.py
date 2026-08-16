@@ -25,14 +25,15 @@ class Settings(BaseSettings):
     qdrant_path: Path = Field(default=_REPO_ROOT / "data" / "qdrant")
     ledger_path: Path = Field(default=_REPO_ROOT / "data" / "ledger.json")
 
-    # --- Ollama (host service on the GPU box) ------------------------------
+    # --- Ollama (host service on a GPU box) --------------------------------
     # LLM uses the OpenAI-compatible /v1 path; embeddings use the NATIVE /api/embed.
-    ollama_base_url: str = "http://192.168.86.11:11434"
-    llm_model: str = "qwen2.5:14b"
-    embedding_model: str = "qwen3-embedding"
-    # qwen3-embedding is 2560-dim on this box (verified); /api/embed would otherwise
-    # be mis-assumed as 3072. Keep this in sync with the chosen model.
-    embedding_dim: int = 2560
+    # Default = the dual-GPU box (.78), which serves over the LAN and carries the qwen3
+    # chat model + a pulled nomic embedder. The single-5090 box (.11) is the other host
+    # Ollama but was unreachable during bring-up. Keep embedding_dim in sync with the model.
+    ollama_base_url: str = "http://192.168.86.78:11434"
+    llm_model: str = "registry.hackbarn.org/hf-co-unsloth/qwen3-30b-a3b-gguf:Q6_K"
+    embedding_model: str = "nomic-embed-text"  # 768-dim (verified live via /api/embed)
+    embedding_dim: int = 768
 
     # --- Behaviour ---------------------------------------------------------
     # Offline = deterministic stub embedder + template LLM. Auto-forced on if the
