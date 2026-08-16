@@ -19,28 +19,63 @@ from typing import Optional
 log = logging.getLogger("tubewiki.transcripts")
 
 
+_LANGS = ["en", "en-US", "en-GB"]
+
+
+def _snippets_to_text(fetched) -> str:
+    """Flatten a fetched transcript to plain text, across library versions.
+    1.x returns a FetchedTranscript (has to_raw_data()); older returns list[dict]."""
+    rows = fetched.to_raw_data() if hasattr(fetched, "to_raw_data") else fetched
+    parts = []
+    for r in rows:
+        parts.append(r.get("text", "") if isinstance(r, dict) else (getattr(r, "text", "") or ""))
+    return " ".join(p for p in parts if p).replace("\n", " ").strip()
+
+
 def _fetch_via_api(video_id: str) -> Optional[str]:
-    """youtube-transcript-api. Prefers manual captions, falls back to auto-generated.
-    Handles both the classic and the newer instance API shapes."""
+    """youtube-transcript-api. Prefers manual captions over auto-generated, translates to
+    English when needed. Handles the 1.x instance API and the legacy static API."""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
     except ImportError:
         return None
+
+    # 1.x instance API: list tracks, prefer manual → generated → any (translated).
     try:
-        # Newer API (>=0.6.2): instance .fetch()
-        if hasattr(YouTubeTranscriptApi, "list") or hasattr(YouTubeTranscriptApi(), "fetch"):
-            api = YouTubeTranscriptApi()
-            fetched = api.fetch(video_id)
-            snippets = getattr(fetched, "snippets", fetched)
-            return " ".join(getattr(s, "text", s.get("text", "")) for s in snippets).strip() or None
+        ytt = YouTubeTranscriptApi()
+        if hasattr(ytt, "list"):
+            tl = ytt.list(video_id)
+            transcript = None
+            for finder in ("find_manually_created_transcript", "find_generated_transcript"):
+                try:
+                    transcript = getattr(tl, finder)(_LANGS)
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
+            if transcript is None:
+                for t in tl:  # any language; translate to en if the track allows it
+                    try:
+                        transcript = t.translate("en") if getattr(t, "is_translatable", False) else t
+                    except Exception:  # noqa: BLE001
+                        transcript = t
+                    break
+            if transcript is not None:
+                text = _snippets_to_text(transcript.fetch())
+                if text:
+                    return text
+        elif hasattr(ytt, "fetch"):
+            text = _snippets_to_text(ytt.fetch(video_id, languages=_LANGS))
+            if text:
+                return text
     except Exception as e:  # noqa: BLE001
-        log.info("instance fetch failed for %s (%s); trying classic API", video_id, e)
+        log.info("transcript-api (instance) failed for %s: %s", video_id, e)
+
+    # Legacy static API (< 1.0)
     try:
-        # Classic API: static get_transcript()
-        segments = YouTubeTranscriptApi.get_transcript(video_id)  # type: ignore[attr-defined]
-        return " ".join(s["text"] for s in segments).strip() or None
+        seg = YouTubeTranscriptApi.get_transcript(video_id, languages=_LANGS)  # type: ignore[attr-defined]
+        return " ".join(s["text"] for s in seg).strip() or None
     except Exception as e:  # noqa: BLE001
-        log.info("no transcript via API for %s: %s", video_id, e)
+        log.info("transcript-api (legacy) failed for %s: %s", video_id, e)
         return None
 
 
