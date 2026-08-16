@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>TubeWiki settings</title>
+<style>
+  body { font: 14px -apple-system, Segoe UI, Roboto, sans-serif; max-width: 520px;
+         margin: 40px auto; padding: 0 20px; color: #1a1d24; }
+  h1 { font-size: 18px; }
+  label { display: block; margin: 18px 0 6px; font-weight: 600; }
+  input { width: 100%; padding: 9px 10px; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
+  .hint { color: #667; font-size: 12px; margin-top: 6px; }
+  button { margin-top: 20px; padding: 9px 16px; border: 0; border-radius: 8px;
+           background: #2563eb; color: #fff; font-size: 14px; cursor: pointer; }
+  #saved { color: #16a34a; margin-left: 10px; font-size: 13px; }
+  hr { margin: 28px 0; border: 0; border-top: 1px solid #eee; }
+  .note { color: #667; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>TubeWiki settings</h1>
+
+<label for="backend">Backend URL</label>
+<input id="backend" placeholder="http://localhost:8000" />
+<div class="hint">Where the TubeWiki backend is running. On the homelab this is the
+host/cluster address; for local dev it's <code>http://localhost:8000</code>.</div>
+
+<button id="save">Save</button><span id="saved"></span>
+
+<hr />
+<p class="note">Phase 1 captures on tab open and auto-approves everything. Trigger rules
+(whitelist/blacklist, watch-percentage threshold) arrive in Phase 4.</p>
+
+<script src="options.js"></script>
+</body>
+</html>

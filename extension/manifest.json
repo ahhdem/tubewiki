@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "TubeWiki Capture",
+  "version": "0.1.0",
+  "description": "Capture YouTube transcripts (logged-in session) into your self-building TubeWiki.",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "http://192.168.86.11/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "TubeWiki" },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["inject.js"], "matches": ["https://www.youtube.com/*"] }
+  ]
+}

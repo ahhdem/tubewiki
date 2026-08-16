@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TubeWiki</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --ink:#e6e8ec; --muted:#8b93a1;
+          --accent:#6ea8fe; --line:#262b36; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--ink); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex;
+           gap:14px; align-items:center; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.3px; }
+  header .tag { color:var(--muted); font-size:12px; }
+  #search { margin-left:auto; background:var(--panel); border:1px solid var(--line);
+            color:var(--ink); padding:7px 10px; border-radius:8px; width:280px; }
+  .wrap { display:grid; grid-template-columns:300px 1fr; height:calc(100vh - 51px); }
+  aside { border-right:1px solid var(--line); overflow:auto; padding:10px; }
+  main { overflow:auto; padding:26px 34px; max-width:820px; }
+  .item { padding:9px 11px; border-radius:8px; cursor:pointer; }
+  .item:hover { background:var(--panel); }
+  .item.active { background:var(--panel); outline:1px solid var(--line); }
+  .item .t { font-weight:600; }
+  .item .m { color:var(--muted); font-size:12px; }
+  h2.page-title { margin:0 0 4px; }
+  .page-meta { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  .claim { position:relative; padding:2px 0; }
+  .claim .src { color:var(--muted); font-size:12px; margin-left:8px; opacity:0; }
+  .claim:hover .src { opacity:1; }
+  .refs { margin-top:30px; padding-top:14px; border-top:1px solid var(--line); }
+  .refs h3 { font-size:14px; color:var(--muted); text-transform:uppercase;
+             letter-spacing:.5px; }
+  .refs a { color:var(--accent); text-decoration:none; }
+  .empty { color:var(--muted); padding:40px; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TubeWiki</h1>
+  <span class="tag" id="mode">·</span>
+  <input id="search" placeholder="Search concepts…" />
+</header>
+<div class="wrap">
+  <aside id="list"></aside>
+  <main id="page"><div class="empty">Select a concept, or POST a video to <code>/ingest</code>.</div></main>
+</div>
+<script>
+const listEl = document.getElementById('list');
+const pageEl = document.getElementById('page');
+const modeEl = document.getElementById('mode');
+let active = null;
+
+async function j(url){ const r = await fetch(url); if(!r.ok) throw new Error(r.status); return r.json(); }
+
+async function loadHealth(){
+  try { const h = await j('/healthz');
+    modeEl.textContent = (h.offline ? 'offline (stub)' : 'live · '+h.ollama) + ' · ' + h.pages + ' pages';
+  } catch(e){ modeEl.textContent = 'backend unreachable'; }
+}
+
+async function loadList(items){
+  items = items || await j('/api/pages');
+  if(!items.length){ listEl.innerHTML = '<div class="empty">No pages yet.</div>'; return; }
+  listEl.innerHTML = '';
+  for(const p of items){
+    const d = document.createElement('div');
+    d.className = 'item' + (p.slug===active ? ' active':'');
+    d.innerHTML = `<div class="t">${esc(p.title)}</div><div class="m">${p.claims||0} claims · ${p.sources||0} sources</div>`;
+    d.onclick = ()=>openPage(p.slug);
+    listEl.appendChild(d);
+  }
+}
+
+async function openPage(slug){
+  active = slug; await loadList();
+  const p = await j('/api/pages/'+slug);
+  const claims = p.claims.map(c=>{
+    const s = p.sources[c.source_id];
+    const label = s ? esc(s.title) : c.source_id;
+    return `<div class="claim">${esc(c.text)}<span class="src">↳ ${label}</span></div>`;
+  }).join('');
+  const refs = Object.entries(p.sources).map(([sid,s],i)=>
+    `<li>${i+1}. <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`+
+    `${s.channel?' · '+esc(s.channel):''} <code>${esc(sid)}</code></li>`).join('');
+  pageEl.innerHTML =
+    `<h2 class="page-title">${esc(p.title)}</h2>`+
+    `<div class="page-meta">updated ${esc(p.updated)}</div>`+
+    (p.summary?`<p>${esc(p.summary)}</p>`:'')+ claims +
+    `<div class="refs"><h3>References</h3><ul style="list-style:none;padding:0">${refs}</ul></div>`;
+}
+
+function esc(s){ return (s||'').replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+
+let searchTimer;
+document.getElementById('search').addEventListener('input', e=>{
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  searchTimer = setTimeout(async ()=>{
+    if(!q){ loadList(); return; }
+    loadList(await j('/api/search?q='+encodeURIComponent(q)));
+  }, 200);
+});
+
+loadHealth(); loadList();
+</script>
+</body>
+</html>
