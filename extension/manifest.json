@@ -3,7 +3,7 @@
   "name": "TubeWiki Capture",
   "version": "0.1.0",
   "description": "Capture YouTube transcripts (logged-in session) into your self-building TubeWiki.",
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "tabs"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "http://localhost/*",
