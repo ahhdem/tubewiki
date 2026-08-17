@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Protocol
 
 import httpx
@@ -76,25 +77,29 @@ class OllamaLLM:
         self._model = settings.llm_model
 
     def _chat(self, system: str, user: str, temperature: float = 0.2) -> str:
-        r = httpx.post(
-            self._url,
-            headers={"Authorization": "Bearer ollama"},
-            json={
-                "model": self._model,
-                "temperature": temperature,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            },
-            timeout=180,
-        )
-        r.raise_for_status()
-        content = r.json()["choices"][0]["message"]["content"]
-        # Ollama routes qwen3 "thinking" to a separate `reasoning` field, but strip any
-        # inline <think> blocks defensively so they never leak into claims/concepts.
-        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
-        return content.strip()
+        payload = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        last_err = None
+        for attempt in range(3):  # the box occasionally 500s / drops under load
+            try:
+                r = httpx.post(self._url, headers={"Authorization": "Bearer ollama"},
+                               json=payload, timeout=180)
+                r.raise_for_status()
+                content = r.json()["choices"][0]["message"]["content"]
+                # Ollama routes qwen3 "thinking" to a separate `reasoning` field, but strip
+                # inline <think> blocks defensively so they never leak into output.
+                return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            except (httpx.HTTPStatusError, httpx.TransportError, httpx.TimeoutException) as e:
+                last_err = e
+                log.info("ollama chat attempt %d/3 failed: %s", attempt + 1, e)
+                time.sleep(1.5 * (attempt + 1))
+        raise last_err
 
     def choose_concept(self, title: str, transcript: str, existing_titles: list[str]) -> str:
         existing = "\n".join(f"- {t}" for t in existing_titles) or "(none yet)"
@@ -105,8 +110,12 @@ class OllamaLLM:
             "video fits one. Reply with only the concept name."
         )
         user = f"Existing concepts:\n{existing}\n\nVideo title: {title}\n\nExcerpt:\n{transcript[:2000]}"
-        out = self._chat(system, user).splitlines()[0].strip(" #-*\"")
-        return out or _clean_concept(title)
+        try:
+            out = self._chat(system, user).splitlines()[0].strip(" #-*\"")
+            return out or _clean_concept(title)
+        except Exception as e:  # noqa: BLE001 — fall back to the heuristic, don't fail ingest
+            log.warning("choose_concept fell back to heuristic for %r: %s", title, e)
+            return _clean_concept(title)
 
     def extract_claims(self, title: str, transcript: str) -> list[str]:
         system = (
