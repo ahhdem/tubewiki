@@ -74,52 +74,115 @@ async function captureTab(tabId) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Phase 1: scan every open watch tab and capture its transcript, but DO NOT ingest.
-// Full payloads (incl. transcript) are stashed in storage.session; the popup gets back
-// light metadata + a thumbnail to render a review list.
+function videoIdFromUrl(url) {
+  const m = (url || "").match(/(?:[?&]v=|youtu\.be\/|\/shorts\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function cleanTabTitle(title) {
+  return (title || "")
+    .replace(/^\(\d+\)\s*/, "")   // strip "(3) " unread-count prefix
+    .replace(/\s*-\s*YouTube$/, "")
+    .trim();
+}
+
+// Wait for a tab to finish (re)loading, with a timeout.
+function waitForComplete(tabId, timeout) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; clearTimeout(timer); chrome.tabs.onUpdated.removeListener(listener); resolve(); } };
+    const listener = (id, info) => { if (id === tabId && info.status === "complete") finish(); };
+    const timer = setTimeout(finish, timeout);
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+// Reload a discarded/unloaded tab, then capture once the player data is present.
+async function loadAndCapture(tabId) {
+  try {
+    const t = await chrome.tabs.get(tabId);
+    if (t.discarded || t.status !== "complete") {
+      await chrome.tabs.reload(tabId);
+      await waitForComplete(tabId, 20000);
+      await sleep(1500); // let ytInitialPlayerResponse populate
+    }
+  } catch (e) {
+    return null; // tab was closed
+  }
+  for (let i = 0; i < 6; i++) {
+    let info = null;
+    try { info = await captureTab(tabId); } catch (e) { /* retry */ }
+    if (info && info.video_id && info.transcript) return info;
+    await sleep(1200);
+  }
+  try { return await captureTab(tabId); } catch (e) { return null; }
+}
+
+// Phase 1: enumerate ALL open watch tabs (including discarded ones). Capture the
+// transcript now for loaded tabs; for discarded tabs, record metadata from the tab
+// object and defer the transcript to ingest time. Nothing is ingested here.
 async function scanTabs() {
   const tabs = await chrome.tabs.query({ url: ["*://www.youtube.com/watch*", "*://youtube.com/watch*"] });
   const seen = new Set(), pending = [];
   for (const tab of tabs) {
-    try {
-      const info = await captureTab(tab.id);
-      if (info && info.video_id && !seen.has(info.video_id)) {
-        seen.add(info.video_id);
-        pending.push(info);
-      }
-    } catch (e) {
-      /* tab not injectable (not a real watch page yet) — skip */
+    const vid = videoIdFromUrl(tab.url);
+    if (!vid || seen.has(vid)) continue;
+    seen.add(vid);
+
+    let info = null;
+    if (!tab.discarded) {
+      try { info = await captureTab(tab.id); } catch (e) { /* not ready */ }
     }
-    await sleep(150);
+    pending.push({
+      tabId: tab.id,
+      video_id: vid,
+      title: (info && info.title) || cleanTabTitle(tab.title) || vid,
+      channel: (info && info.channel) || null,
+      url: (info && info.url) || (tab.url || "").split("&")[0],
+      transcript: (info && info.transcript) || null,
+      discarded: !!tab.discarded,
+    });
+    if (info) await sleep(120);
   }
   await chrome.storage.session.set({ pending });
   return pending.map((p) => ({
     video_id: p.video_id,
-    title: p.title || p.video_id,
-    channel: p.channel || null,
-    url: p.url || null,
-    hasTranscript: !!(p.transcript && p.transcript.length),
+    title: p.title,
+    channel: p.channel,
+    hasTranscript: !!p.transcript,
+    needsLoad: !p.transcript, // discarded or not-yet-loaded → will reload on ingest
     thumb: `https://i.ytimg.com/vi/${p.video_id}/mqdefault.jpg`,
   }));
 }
 
-// Phase 2: ingest only the video ids the user kept checked.
+// Phase 2: ingest only the checked ids. Discarded/uncaptured tabs are reloaded and
+// captured on demand here (so we only ever force-load the ones you actually picked).
 async function ingestSelected(ids) {
   const set = new Set(ids);
   const { pending = [] } = await chrome.storage.session.get("pending");
   let ingested = 0, skipped = 0, failed = 0;
   for (const p of pending) {
     if (!set.has(p.video_id)) continue;
+    const payload = {
+      video_id: p.video_id, title: p.title || "", channel: p.channel || null,
+      url: p.url || null, transcript: p.transcript || null,
+    };
+    if (!payload.transcript && p.tabId != null) {
+      const fresh = await loadAndCapture(p.tabId);
+      if (fresh) {
+        payload.transcript = fresh.transcript || null;
+        if (fresh.title) payload.title = fresh.title;
+        if (fresh.channel) payload.channel = fresh.channel;
+        if (fresh.url) payload.url = fresh.url;
+      }
+    }
     try {
-      const res = await ingest({
-        video_id: p.video_id, title: p.title || "", channel: p.channel || null,
-        url: p.url || null, transcript: p.transcript || null,
-      });
+      const res = await ingest(payload);
       if (res.status === "ingested") ingested++; else skipped++;
     } catch (e) {
       failed++;
     }
-    await sleep(200); // hits the backend, not YouTube
+    await sleep(200);
   }
   return { selected: ids.length, ingested, skipped, failed };
 }

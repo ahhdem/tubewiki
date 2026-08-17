@@ -67,8 +67,10 @@ function render() {
     statusEl.textContent = statusEl.textContent || "";
     return;
   }
-  const withT = candidates.filter((c) => c.hasTranscript).length;
-  statusEl.textContent = `${candidates.length} videos · ${withT} with transcripts`;
+  const ready = candidates.filter((c) => !c.needsLoad).length;
+  const willLoad = candidates.length - ready;
+  statusEl.textContent =
+    `${candidates.length} videos · ${ready} loaded` + (willLoad ? ` · ${willLoad} will load on ingest` : "");
   $("all").classList.remove("hidden");
   $("none").classList.remove("hidden");
   footEl.classList.remove("hidden");
@@ -77,11 +79,11 @@ function render() {
   for (const c of candidates) {
     const card = document.createElement("label");
     card.className = "card";
-    const noT = c.hasTranscript
-      ? ""
-      : '<span class="badge">no transcript</span>';
+    const noT = c.needsLoad
+      ? '<span class="badge load">loads on ingest</span>'
+      : "";
     card.innerHTML =
-      `<input type="checkbox" data-id="${esc(c.video_id)}" ${c.hasTranscript ? "checked" : ""}>` +
+      `<input type="checkbox" data-id="${esc(c.video_id)}" checked>` +
       `<img src="${esc(c.thumb)}" loading="lazy">` +
       `<div class="meta"><div class="t">${esc(c.title)}</div>` +
       `<div class="m">${esc(c.channel || "")} ${noT}</div></div>`;
