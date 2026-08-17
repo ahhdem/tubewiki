@@ -74,24 +74,54 @@ async function captureTab(tabId) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function captureAll() {
+// Phase 1: scan every open watch tab and capture its transcript, but DO NOT ingest.
+// Full payloads (incl. transcript) are stashed in storage.session; the popup gets back
+// light metadata + a thumbnail to render a review list.
+async function scanTabs() {
   const tabs = await chrome.tabs.query({ url: ["*://www.youtube.com/watch*", "*://youtube.com/watch*"] });
-  let ingested = 0, skipped = 0, failed = 0;
+  const seen = new Set(), pending = [];
   for (const tab of tabs) {
     try {
       const info = await captureTab(tab.id);
-      if (!info || !info.video_id) { failed++; continue; }
+      if (info && info.video_id && !seen.has(info.video_id)) {
+        seen.add(info.video_id);
+        pending.push(info);
+      }
+    } catch (e) {
+      /* tab not injectable (not a real watch page yet) — skip */
+    }
+    await sleep(150);
+  }
+  await chrome.storage.session.set({ pending });
+  return pending.map((p) => ({
+    video_id: p.video_id,
+    title: p.title || p.video_id,
+    channel: p.channel || null,
+    url: p.url || null,
+    hasTranscript: !!(p.transcript && p.transcript.length),
+    thumb: `https://i.ytimg.com/vi/${p.video_id}/mqdefault.jpg`,
+  }));
+}
+
+// Phase 2: ingest only the video ids the user kept checked.
+async function ingestSelected(ids) {
+  const set = new Set(ids);
+  const { pending = [] } = await chrome.storage.session.get("pending");
+  let ingested = 0, skipped = 0, failed = 0;
+  for (const p of pending) {
+    if (!set.has(p.video_id)) continue;
+    try {
       const res = await ingest({
-        video_id: info.video_id, title: info.title || "", channel: info.channel || null,
-        url: info.url || null, transcript: info.transcript || null,
+        video_id: p.video_id, title: p.title || "", channel: p.channel || null,
+        url: p.url || null, transcript: p.transcript || null,
       });
       if (res.status === "ingested") ingested++; else skipped++;
     } catch (e) {
       failed++;
     }
-    await sleep(250); // gentle pacing; these hit the backend, not YouTube
+    await sleep(200); // hits the backend, not YouTube
   }
-  return { total: tabs.length, ingested, skipped, failed };
+  return { selected: ids.length, ingested, skipped, failed };
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -101,8 +131,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch((e) => sendResponse({ status: "error", detail: String(e) }));
     return true;
   }
-  if (msg.type === "captureAll") {
-    captureAll()
+  if (msg.type === "scanTabs") {
+    scanTabs()
+      .then((candidates) => sendResponse({ candidates }))
+      .catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === "ingestSelected") {
+    ingestSelected(msg.ids || [])
       .then(sendResponse)
       .catch((e) => sendResponse({ error: String(e) }));
     return true;

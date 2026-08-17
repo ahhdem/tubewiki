@@ -3,22 +3,35 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  body { width: 320px; margin: 0; font: 13px -apple-system, Segoe UI, Roboto, sans-serif;
-         background: #171a21; color: #e6e8ec; }
-  header { padding: 10px 12px; border-bottom: 1px solid #262b36; display: flex; align-items: center; gap: 8px; }
+  :root { --bg:#171a21; --panel:#1f232c; --line:#2a2f3a; --ink:#e6e8ec; --muted:#8b93a1;
+          --accent:#2563eb; }
+  body { width: 360px; margin: 0; font: 13px -apple-system, Segoe UI, Roboto, sans-serif;
+         background: var(--bg); color: var(--ink); }
+  header { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
   header b { font-size: 14px; }
   header a { margin-left: auto; color: #6ea8fe; text-decoration: none; font-size: 12px; }
-  .list { max-height: 340px; overflow: auto; }
-  .row { padding: 9px 12px; border-bottom: 1px solid #20242e; }
-  .row .t { font-weight: 600; }
-  .row .m { color: #8b93a1; font-size: 11px; }
-  .empty { padding: 22px; text-align: center; color: #8b93a1; }
-  .badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; background: #223; color: #9db; }
-  .bar { padding: 8px 12px; border-bottom: 1px solid #262b36; }
-  #captureAll { width: 100%; padding: 8px; border: 0; border-radius: 8px; cursor: pointer;
-                background: #2563eb; color: #fff; font-size: 13px; font-weight: 600; }
-  #captureAll:disabled { opacity: .6; cursor: default; }
-  #status { color: #8b93a1; font-size: 11px; margin-top: 6px; min-height: 14px; }
+  .bar { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+  button { border: 0; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; padding: 8px 12px; }
+  button:disabled { opacity: .55; cursor: default; }
+  #scan { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
+  .link { margin-left: auto; font-size: 12px; color: var(--muted); background: none; border: 0; cursor: pointer; }
+  #status { color: var(--muted); font-size: 11px; padding: 0 12px; min-height: 15px; }
+  .list { max-height: 400px; overflow: auto; padding: 6px; }
+  .empty { padding: 26px; text-align: center; color: var(--muted); }
+  .card { display: flex; gap: 9px; align-items: center; padding: 7px; border-radius: 9px; }
+  .card:hover { background: var(--panel); }
+  .card input { width: 16px; height: 16px; flex: none; accent-color: var(--accent); }
+  .card img { width: 72px; height: 40px; object-fit: cover; border-radius: 5px; flex: none; background: #000; }
+  .card .meta { min-width: 0; }
+  .card .t { font-weight: 600; line-height: 1.25; overflow: hidden; display: -webkit-box;
+             -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .card .m { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; background: #3a2a2a; color: #e2a; }
+  .foot { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line);
+          padding: 9px 12px; display: flex; gap: 8px; align-items: center; }
+  #ingest { background: var(--accent); color: #fff; flex: 1; }
+  .foot .sel { font-size: 11px; color: var(--muted); }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
@@ -26,11 +39,23 @@
   <b>TubeWiki</b>
   <a id="open" href="#" target="_blank">Open wiki ↗</a>
 </header>
+
 <div class="bar">
-  <button id="captureAll">Capture all open YouTube tabs</button>
-  <div id="status"></div>
+  <button id="scan">Scan open YouTube tabs</button>
+  <button id="all" class="link hidden">all</button>
+  <button id="none" class="link hidden">none</button>
 </div>
-<div class="list" id="list"><div class="empty">No captures this session yet.</div></div>
+<div id="status"></div>
+
+<div class="list" id="list">
+  <div class="empty">Click <b>Scan</b> to preview the videos in your open tabs before ingesting.</div>
+</div>
+
+<div class="foot hidden" id="foot">
+  <button id="ingest">Ingest selected</button>
+  <span class="sel" id="sel"></span>
+</div>
+
 <script src="popup.js"></script>
 </body>
 </html>
