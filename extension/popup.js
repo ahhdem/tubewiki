@@ -6,6 +6,11 @@ let candidates = [];
 (async function init() {
   const { backendUrl } = await chrome.storage.sync.get("backendUrl");
   $("open").href = ((backendUrl || "http://localhost:8000").replace(/\/$/, "")) + "/";
+  // If a batch is mid-flight (popup was closed and reopened), surface its progress.
+  const { batch } = await chrome.storage.session.get("batch");
+  if (batch && batch.running) {
+    statusEl.textContent = `Ingesting… ${batch.done}/${batch.total} (${batch.ingested} ok)`;
+  }
 })();
 
 $("scan").addEventListener("click", async () => {

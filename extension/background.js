@@ -74,6 +74,24 @@ async function captureTab(tabId) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// MV3 kills the service worker after ~30s idle, which stops a long batch the moment the
+// popup closes. Pinging an extension API on an interval resets that timer for the batch's
+// duration. Ref: Chrome "keep a service worker alive" pattern.
+let _keepAlive = null;
+function startKeepAlive() {
+  if (_keepAlive) return;
+  _keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
+}
+function stopKeepAlive() {
+  if (_keepAlive) { clearInterval(_keepAlive); _keepAlive = null; }
+}
+
+// Toolbar badge = progress you can watch without the popup open.
+function setBadge(text) {
+  chrome.action.setBadgeBackgroundColor({ color: "#2563eb" });
+  chrome.action.setBadgeText({ text });
+}
+
 function videoIdFromUrl(url) {
   const m = (url || "").match(/(?:[?&]v=|youtu\.be\/|\/shorts\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
@@ -122,6 +140,8 @@ async function loadAndCapture(tabId) {
 // transcript now for loaded tabs; for discarded tabs, record metadata from the tab
 // object and defer the transcript to ingest time. Nothing is ingested here.
 async function scanTabs() {
+  startKeepAlive();
+  try {
   const tabs = await chrome.tabs.query({ url: ["*://www.youtube.com/watch*", "*://youtube.com/watch*"] });
   const seen = new Set(), pending = [];
   for (const tab of tabs) {
@@ -153,6 +173,9 @@ async function scanTabs() {
     needsLoad: !p.transcript, // discarded or not-yet-loaded → will reload on ingest
     thumb: `https://i.ytimg.com/vi/${p.video_id}/mqdefault.jpg`,
   }));
+  } finally {
+    stopKeepAlive();
+  }
 }
 
 // Phase 2: ingest only the checked ids. Discarded/uncaptured tabs are reloaded and
@@ -160,29 +183,44 @@ async function scanTabs() {
 async function ingestSelected(ids) {
   const set = new Set(ids);
   const { pending = [] } = await chrome.storage.session.get("pending");
-  let ingested = 0, skipped = 0, failed = 0;
-  for (const p of pending) {
-    if (!set.has(p.video_id)) continue;
-    const payload = {
-      video_id: p.video_id, title: p.title || "", channel: p.channel || null,
-      url: p.url || null, transcript: p.transcript || null,
-    };
-    if (!payload.transcript && p.tabId != null) {
-      const fresh = await loadAndCapture(p.tabId);
-      if (fresh) {
-        payload.transcript = fresh.transcript || null;
-        if (fresh.title) payload.title = fresh.title;
-        if (fresh.channel) payload.channel = fresh.channel;
-        if (fresh.url) payload.url = fresh.url;
+  const targets = pending.filter((p) => set.has(p.video_id));
+  let ingested = 0, skipped = 0, failed = 0, done = 0;
+
+  startKeepAlive(); // survive the popup closing / SW idle timeout
+  try {
+    for (const p of targets) {
+      const payload = {
+        video_id: p.video_id, title: p.title || "", channel: p.channel || null,
+        url: p.url || null, transcript: p.transcript || null,
+      };
+      if (!payload.transcript && p.tabId != null) {
+        const fresh = await loadAndCapture(p.tabId);
+        if (fresh) {
+          payload.transcript = fresh.transcript || null;
+          if (fresh.title) payload.title = fresh.title;
+          if (fresh.channel) payload.channel = fresh.channel;
+          if (fresh.url) payload.url = fresh.url;
+        }
       }
+      try {
+        const res = await ingest(payload);
+        if (res.status === "ingested") ingested++; else skipped++;
+      } catch (e) {
+        failed++;
+      }
+      done++;
+      setBadge(String(targets.length - done)); // remaining count on the toolbar icon
+      await chrome.storage.session.set({
+        batch: { done, total: targets.length, ingested, skipped, failed, running: true },
+      });
+      await sleep(200); // hits the backend, not YouTube
     }
-    try {
-      const res = await ingest(payload);
-      if (res.status === "ingested") ingested++; else skipped++;
-    } catch (e) {
-      failed++;
-    }
-    await sleep(200);
+  } finally {
+    stopKeepAlive();
+    setBadge("");
+    await chrome.storage.session.set({
+      batch: { done, total: targets.length, ingested, skipped, failed, running: false },
+    });
   }
   return { selected: ids.length, ingested, skipped, failed };
 }
