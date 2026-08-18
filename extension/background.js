@@ -225,6 +225,49 @@ async function ingestSelected(ids) {
   return { selected: ids.length, ingested, skipped, failed };
 }
 
+// Export every open tab's transcript to a downloadable JSON — fully offline (no backend,
+// no runner touching YouTube). Captures through the logged-in session (the resilient
+// path), loading discarded tabs as needed. You upload the file back for ingestion.
+async function exportTranscripts() {
+  const tabs = await chrome.tabs.query({ url: ["*://www.youtube.com/watch*", "*://youtube.com/watch*"] });
+  const seen = new Set(), out = [];
+  let done = 0;
+  startKeepAlive();
+  try {
+    for (const tab of tabs) {
+      const vid = videoIdFromUrl(tab.url);
+      if (!vid || seen.has(vid)) continue;
+      seen.add(vid);
+      let info = null;
+      if (!tab.discarded) {
+        try { info = await captureTab(tab.id); } catch (e) { /* retry via load */ }
+      }
+      if (!info || !info.transcript) {
+        const fresh = await loadAndCapture(tab.id);
+        if (fresh) info = fresh;
+      }
+      out.push({
+        video_id: vid,
+        title: (info && info.title) || cleanTabTitle(tab.title) || vid,
+        channel: (info && info.channel) || null,
+        url: (info && info.url) || (tab.url || "").split("&")[0],
+        transcript: (info && info.transcript) || null,
+      });
+      done++;
+      setBadge(String(tabs.length - done));
+      await sleep(200);
+    }
+  } finally {
+    stopKeepAlive();
+    setBadge("");
+  }
+  const withT = out.filter((o) => o.transcript).length;
+  const json = JSON.stringify(out, null, 2);
+  const url = "data:application/json;charset=utf-8," + encodeURIComponent(json);
+  await chrome.downloads.download({ url, filename: "tubewiki-transcripts.json", saveAs: true });
+  return { total: out.length, withTranscript: withT };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "ingest") {
     ingest(msg.payload)
@@ -240,6 +283,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === "ingestSelected") {
     ingestSelected(msg.ids || [])
+      .then(sendResponse)
+      .catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === "exportTranscripts") {
+    exportTranscripts()
       .then(sendResponse)
       .catch((e) => sendResponse({ error: String(e) }));
     return true;

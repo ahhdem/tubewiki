@@ -28,6 +28,16 @@ $("scan").addEventListener("click", async () => {
   });
 });
 
+$("export").addEventListener("click", () => {
+  $("export").disabled = true;
+  statusEl.textContent = "Exporting transcripts… (watch the toolbar badge; safe to close)";
+  chrome.runtime.sendMessage({ type: "exportTranscripts" }, (r) => {
+    $("export").disabled = false;
+    if (!r || r.error) { statusEl.textContent = "Error: " + (r ? r.error : "no response"); return; }
+    statusEl.textContent = `Exported ${r.total} videos (${r.withTranscript} with transcripts) → download`;
+  });
+});
+
 $("all").addEventListener("click", () => setAll(true));
 $("none").addEventListener("click", () => setAll(false));
 
