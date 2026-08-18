@@ -104,15 +104,30 @@ class OllamaLLM:
     def choose_concept(self, title: str, transcript: str, existing_titles: list[str]) -> str:
         existing = "\n".join(f"- {t}" for t in existing_titles) or "(none yet)"
         system = (
-            "You organize a wiki. Given a video, name the single canonical CONCEPT it "
-            "contributes to. Videos are the source, not the subject — prefer broad, "
-            "reusable concept names, and REUSE an existing concept verbatim when the "
-            "video fits one. Reply with only the concept name."
+            "You maintain the topic index of a wiki. Output the single canonical TOPIC a "
+            "video belongs under. Strict rules:\n"
+            "- 1 to 4 words. A noun phrase naming a topic — NOT a description or sentence.\n"
+            "- Title Case. No verbs, no 'How to', no colons, no clickbait, no year.\n"
+            "- Prefer a BROAD, reusable topic so many videos can share it.\n"
+            "- If the video fits one of the existing topics, reply with it VERBATIM.\n"
+            "Reply with ONLY the topic, nothing else.\n\n"
+            "Examples:\n"
+            "'I Built an AI Agent That Books My Flights (INSANE)' -> AI Agents\n"
+            "'The Complete Guide to Kubernetes Networking in 2026' -> Kubernetes Networking\n"
+            "'Why RAG is Dead and What Comes Next' -> Retrieval-Augmented Generation"
         )
-        user = f"Existing concepts:\n{existing}\n\nVideo title: {title}\n\nExcerpt:\n{transcript[:2000]}"
+        user = f"Existing topics:\n{existing}\n\nVideo title: {title}\n\nTranscript excerpt:\n{transcript[:1500]}"
         try:
-            out = self._chat(system, user).splitlines()[0].strip(" #-*\"")
-            return out or _clean_concept(title)
+            out = self._chat(system, user, temperature=0.0).splitlines()[0]
+            out = re.sub(r"^(topic|category)\s*[:\-]\s*", "", out, flags=re.I)  # strip "Topic:" prefix
+            out = out.strip(" \t#*\"'`.").strip()
+            if not out:
+                return _clean_concept(title)
+            # Snap casing/spacing variants onto an existing topic so pages actually merge.
+            for et in existing_titles:
+                if slugify(et) == slugify(out):
+                    return et
+            return out
         except Exception as e:  # noqa: BLE001 — fall back to the heuristic, don't fail ingest
             log.warning("choose_concept fell back to heuristic for %r: %s", title, e)
             return _clean_concept(title)
