@@ -27,8 +27,16 @@
   h2.page-title { margin:0 0 4px; }
   .page-meta { color:var(--muted); font-size:13px; margin-bottom:20px; }
   .claim { position:relative; padding:2px 0; }
-  .claim .src { color:var(--muted); font-size:12px; margin-left:8px; opacity:0; }
-  .claim:hover .src { opacity:1; }
+  .cite { color:var(--muted); font-size:12px; margin-left:8px; opacity:0; position:relative; cursor:pointer; }
+  .claim:hover .cite { opacity:1; }
+  /* hover card: thumbnail + title, links to the source video */
+  .cite-card { display:none; position:absolute; bottom:100%; left:0; padding-bottom:8px; z-index:20; }
+  .cite:hover .cite-card, .cite:focus-within .cite-card { display:block; }
+  .cite-card .inner { width:220px; background:var(--panel); border:1px solid var(--line);
+                      border-radius:9px; padding:7px; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+  .cite-card a { display:block; text-decoration:none; color:var(--ink); }
+  .cite-card img { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:6px; display:block; background:#000; }
+  .cite-card .ct { display:block; font-size:11px; line-height:1.35; margin-top:6px; }
   .refs { margin-top:30px; padding-top:14px; border-top:1px solid var(--line); }
   .refs h3 { font-size:14px; color:var(--muted); text-transform:uppercase;
              letter-spacing:.5px; }
@@ -77,9 +85,21 @@ async function openPage(slug){
   active = slug; await loadList();
   const p = await j('/api/pages/'+slug);
   const claims = p.claims.map(c=>{
-    const s = p.sources[c.source_id];
-    const label = s ? esc(s.title) : c.source_id;
-    return `<div class="claim">${esc(c.text)}<span class="src">↳ ${label}</span></div>`;
+    const s = p.sources[c.source_id] || {};
+    const vid = c.source_id.replace(/^yt:/, '');
+    const url = s.url || `https://www.youtube.com/watch?v=${vid}`;
+    const thumb = `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`;
+    const label = s.title || c.source_id;
+    const sub = s.channel ? ` · ${esc(s.channel)}` : '';
+    return `<div class="claim">${esc(c.text)}` +
+      `<span class="cite" tabindex="0">↳ ${esc(label)}` +
+        `<span class="cite-card"><span class="inner">` +
+          `<a href="${esc(url)}" target="_blank" rel="noopener">` +
+            `<img src="${esc(thumb)}" loading="lazy" alt="">` +
+            `<span class="ct">${esc(label)}${sub}</span>` +
+          `</a>` +
+        `</span></span>` +
+      `</span></div>`;
   }).join('');
   const refs = Object.entries(p.sources).map(([sid,s],i)=>
     `<li>${i+1}. <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`+
