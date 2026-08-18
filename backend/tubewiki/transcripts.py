@@ -16,7 +16,26 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+import httpx
+
+from .config import settings
+
 log = logging.getLogger("tubewiki.transcripts")
+
+
+def _fetch_via_service(video_id: str) -> Optional[str]:
+    """Residential transcript service (services/transcribe on .78). Handles captions +
+    Whisper on the far side, so the backend never fetches from a blockable IP itself."""
+    if not settings.transcript_url:
+        return None
+    try:
+        r = httpx.post(settings.transcript_url.rstrip("/") + "/transcript",
+                       json={"video_id": video_id}, timeout=650)
+        r.raise_for_status()
+        return r.json().get("transcript")
+    except Exception as e:  # noqa: BLE001
+        log.info("transcript service failed for %s: %s", video_id, e)
+        return None
 
 
 _LANGS = ["en", "en-US", "en-GB"]
@@ -99,12 +118,11 @@ def _fetch_via_whisper(video_id: str) -> Optional[str]:
 
 
 def get_transcript(video_id: str) -> Optional[str]:
-    """Backend fallback chain (extension path is handled before this is called)."""
-    text = _fetch_via_api(video_id)
-    if text:
-        return text
-    text = _fetch_via_whisper(video_id)
-    if text:
-        return text
+    """Backend fallback chain (extension path is handled before this is called).
+    Residential service first (captions + whisper), then local fetch, then local whisper."""
+    for fetch in (_fetch_via_service, _fetch_via_api, _fetch_via_whisper):
+        text = fetch(video_id)
+        if text:
+            return text
     log.warning("skip-and-log: no transcript obtainable for %s", video_id)
     return None

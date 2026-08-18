@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+youtube-transcript-api>=1.2
+# Whisper fallback (GPU). Omit these two if ENABLE_WHISPER=0 (captions-only).
+faster-whisper>=1.0
+yt-dlp>=2024.0

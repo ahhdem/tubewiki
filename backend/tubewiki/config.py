@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-embed-text"  # 768-dim (verified live via /api/embed)
     embedding_dim: int = 768
 
+    # Residential transcript service (services/transcribe on .78). When set, the backend
+    # calls it first instead of fetching captions itself (which datacenter IPs get blocked
+    # from). "" = disabled → fall back to local youtube-transcript-api. See §4 / OQ#5.
+    transcript_url: str = ""
+
     # --- Behaviour ---------------------------------------------------------
     # Offline = deterministic stub embedder + template LLM. Auto-forced on if the
     # box is unreachable at startup (see clients.py).
