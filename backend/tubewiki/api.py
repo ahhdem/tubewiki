@@ -29,6 +29,7 @@ from .ledger import Ledger
 from .llm import make_llm
 from .models import EvictRequest, IngestRequest, IngestResult
 from .provenance import render_page
+from .taxonomy import Taxonomy
 from .vault import VaultStore
 
 log = logging.getLogger("tubewiki.api")
@@ -47,8 +48,10 @@ def build_app() -> FastAPI:
     llm = make_llm(offline)
     vault = VaultStore(settings.vault_dir)
     ledger = Ledger(settings.ledger_path)
+    taxonomy = Taxonomy(corpus.embedder, settings.taxonomy_path,
+                        settings.canonicalization_threshold)
     write_lock = threading.Lock()  # shared: ingest + curation never interleave writes
-    pipeline = Pipeline(corpus, llm, vault, ledger, lock=write_lock)
+    pipeline = Pipeline(corpus, llm, vault, ledger, lock=write_lock, taxonomy=taxonomy)
     curation = Curation(vault, corpus, ledger, rejected, lock=write_lock)
 
     app = FastAPI(title="TubeWiki", version="0.1.0")

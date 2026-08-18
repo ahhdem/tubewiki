@@ -144,6 +144,20 @@ def test_eviction_removes_source_and_is_sticky(stack):
     assert rejected.seen_similar(evicted_texts[0])
 
 
+def test_taxonomy_canonicalize(tmp_path):
+    from tubewiki.corpus import HashEmbedder
+    from tubewiki.taxonomy import Taxonomy
+
+    t = Taxonomy(HashEmbedder(), tmp_path / "tax.json", threshold=0.8)
+    assert t.canonicalize("AI") == "AI"          # new → registered
+    assert t.canonicalize("ai") == "AI"          # slug match snaps to canonical
+    assert t.canonicalize("Finance") == "Finance"
+    assert set(t.labels) == {"AI", "Finance"}
+    # Persisted across instances.
+    t2 = Taxonomy(HashEmbedder(), tmp_path / "tax.json", threshold=0.8)
+    assert set(t2.labels) == {"AI", "Finance"}
+
+
 def test_no_transcript_skips_and_logs(stack, monkeypatch):
     pipe, vault, _, ledger = stack
     # Simulate the backend fallback chain exhausting (no network dependence in the test).

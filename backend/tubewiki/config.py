@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     vault_dir: Path = Field(default=_REPO_ROOT / "vault")
     qdrant_path: Path = Field(default=_REPO_ROOT / "data" / "qdrant")
     ledger_path: Path = Field(default=_REPO_ROOT / "data" / "ledger.json")
+    taxonomy_path: Path = Field(default=_REPO_ROOT / "data" / "taxonomy.json")
 
     # --- Ollama (host service on a GPU box) --------------------------------
     # LLM uses the OpenAI-compatible /v1 path; embeddings use the NATIVE /api/embed.
@@ -48,6 +49,9 @@ class Settings(BaseSettings):
     chunk_chars: int = 1200
     chunk_overlap: int = 150
     retrieval_top_k: int = 6
+    # Category canonicalization backstop (§7.2, OQ#3). Conservative — bare-label
+    # embeddings are a weak signal (see taxonomy.py); the LLM-reuse is primary.
+    canonicalization_threshold: float = 0.80
 
     # --- API ---------------------------------------------------------------
     host: str = "0.0.0.0"

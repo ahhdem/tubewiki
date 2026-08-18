@@ -17,6 +17,7 @@ from .corpus import Corpus
 from .llm import LLM
 from .models import ConceptPage, Source
 from .provenance import add_claims
+from .taxonomy import Taxonomy
 from .vault import VaultStore
 
 
@@ -38,6 +39,7 @@ def merge_video(
     corpus: Corpus,
     llm: LLM,
     vault: VaultStore,
+    taxonomy: Taxonomy | None = None,
 ) -> tuple[ConceptPage, int, str]:
     """Distil one video into the wiki. Returns (page, claims_added, commit_sha)."""
     sid = source_id_for(video_id)
@@ -54,10 +56,12 @@ def merge_video(
     # 3. Load-or-create the concept page.
     page = vault.read_page(slug) or ConceptPage(title=concept, slug=slug)
 
-    # 3b. New page → place it in the category tree, reusing existing paths (§7.1).
+    # 3b. New page → place it in the category tree, reusing existing paths (§7.1), then
+    # run each segment through the canonicalization backstop (§7.2) to catch drift.
     if not page.category:
         existing_paths = sorted({" / ".join(p.category) for p in pages if p.category})
-        page.category = llm.categorize(concept, transcript, existing_paths)
+        path = llm.categorize(concept, transcript, existing_paths)
+        page.category = taxonomy.canonicalize_path(path) if taxonomy else path
 
     # 4. Distil into claims and merge them with provenance.
     claim_texts = llm.extract_claims(title, transcript)

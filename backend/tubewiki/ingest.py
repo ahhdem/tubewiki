@@ -23,11 +23,12 @@ log = logging.getLogger("tubewiki.ingest")
 
 class Pipeline:
     def __init__(self, corpus: Corpus, llm: LLM, vault: VaultStore, ledger: Ledger,
-                 lock: "threading.Lock | None" = None):
+                 lock: "threading.Lock | None" = None, taxonomy=None):
         self.corpus = corpus
         self.llm = llm
         self.vault = vault
         self.ledger = ledger
+        self.taxonomy = taxonomy
         # Qdrant's local (embedded) mode and the JSON ledger are single-writer; FastAPI
         # runs this sync endpoint in a threadpool, so serialize the whole pipeline. Shared
         # with curation (eviction) so writes never interleave. One user is serial anyway.
@@ -63,6 +64,7 @@ class Pipeline:
             page, added, commit = merge_video(
                 video_id=vid, title=req.title, channel=req.channel, url=req.url,
                 transcript=transcript, corpus=self.corpus, llm=self.llm, vault=self.vault,
+                taxonomy=self.taxonomy,
             )
         except Exception as e:  # noqa: BLE001 — one bad video must not 500 the request
             log.exception("ingest failed for %s", vid)
