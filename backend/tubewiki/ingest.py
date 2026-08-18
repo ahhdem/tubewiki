@@ -22,15 +22,16 @@ log = logging.getLogger("tubewiki.ingest")
 
 
 class Pipeline:
-    def __init__(self, corpus: Corpus, llm: LLM, vault: VaultStore, ledger: Ledger):
+    def __init__(self, corpus: Corpus, llm: LLM, vault: VaultStore, ledger: Ledger,
+                 lock: "threading.Lock | None" = None):
         self.corpus = corpus
         self.llm = llm
         self.vault = vault
         self.ledger = ledger
         # Qdrant's local (embedded) mode and the JSON ledger are single-writer; FastAPI
-        # runs this sync endpoint in a threadpool, so serialize the whole pipeline. One
-        # user ingesting a backlog is inherently serial anyway.
-        self._lock = threading.Lock()
+        # runs this sync endpoint in a threadpool, so serialize the whole pipeline. Shared
+        # with curation (eviction) so writes never interleave. One user is serial anyway.
+        self._lock = lock or threading.Lock()
 
     def ingest(self, req: IngestRequest) -> IngestResult:
         with self._lock:

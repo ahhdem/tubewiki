@@ -18,13 +18,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import threading
+
 from .clients import resolve_offline
 from .config import settings
-from .corpus import Corpus, make_embedder
+from .corpus import Corpus, RejectedClaims, make_embedder
+from .curation import Curation
 from .ingest import Pipeline
 from .ledger import Ledger
 from .llm import make_llm
-from .models import IngestRequest, IngestResult
+from .models import EvictRequest, IngestRequest, IngestResult
 from .provenance import render_page
 from .vault import VaultStore
 
@@ -40,10 +43,13 @@ def build_app() -> FastAPI:
     log.info("TubeWiki starting (offline=%s, ollama=%s)", offline, settings.ollama_base_url)
 
     corpus = Corpus(make_embedder(offline))
+    rejected = RejectedClaims(corpus.client, corpus.embedder)
     llm = make_llm(offline)
     vault = VaultStore(settings.vault_dir)
     ledger = Ledger(settings.ledger_path)
-    pipeline = Pipeline(corpus, llm, vault, ledger)
+    write_lock = threading.Lock()  # shared: ingest + curation never interleave writes
+    pipeline = Pipeline(corpus, llm, vault, ledger, lock=write_lock)
+    curation = Curation(vault, corpus, ledger, rejected, lock=write_lock)
 
     app = FastAPI(title="TubeWiki", version="0.1.0")
     app.state.offline = offline
@@ -61,6 +67,13 @@ def build_app() -> FastAPI:
     @app.post("/ingest", response_model=IngestResult)
     def ingest(req: IngestRequest) -> IngestResult:
         return pipeline.ingest(req)
+
+    @app.post("/evict")
+    def evict(req: EvictRequest) -> dict:
+        sid = req.source_id or (f"yt:{req.video_id}" if req.video_id else None)
+        if not sid:
+            raise HTTPException(400, "provide source_id or video_id")
+        return curation.evict_source(sid)
 
     @app.get("/api/pages")
     def list_pages() -> list[dict]:

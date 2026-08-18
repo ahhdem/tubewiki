@@ -47,6 +47,8 @@
   .refs h3 { font-size:14px; color:var(--muted); text-transform:uppercase;
              letter-spacing:.5px; }
   .refs a { color:var(--accent); text-decoration:none; }
+  .evict { color:#e2a; cursor:pointer; font-size:11px; margin-left:10px; opacity:.6; }
+  .evict:hover { opacity:1; }
   .empty { color:var(--muted); padding:40px; text-align:center; }
 </style>
 </head>
@@ -125,7 +127,8 @@ async function openPage(slug){
   }).join('');
   const refs = Object.entries(p.sources).map(([sid,s],i)=>
     `<li>${i+1}. <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`+
-    `${s.channel?' · '+esc(s.channel):''} <code>${esc(sid)}</code></li>`).join('');
+    `${s.channel?' · '+esc(s.channel):''} <code>${esc(sid)}</code>`+
+    `<span class="evict" data-sid="${esc(sid)}">evict</span></li>`).join('');
   const path = (p.category||[]).map(esc);
   const crumb = path.length ? `<div class="crumb">${path.join(' › ')} › <b>${esc(p.title)}</b></div>` : '';
   pageEl.innerHTML =
@@ -134,6 +137,19 @@ async function openPage(slug){
     `<div class="page-meta">updated ${esc(p.updated)}</div>`+
     (p.summary?`<p>${esc(p.summary)}</p>`:'')+ claims +
     `<div class="refs"><h3>References</h3><ul style="list-style:none;padding:0">${refs}</ul></div>`;
+  pageEl.querySelectorAll('.evict').forEach(el =>
+    el.addEventListener('click', ()=> evictSource(el.dataset.sid)));
+}
+
+async function evictSource(sid){
+  if(!confirm(`Evict ${sid}? This removes its claims from every page (its contributions only).`)) return;
+  await fetch('/evict', {method:'POST', headers:{'content-type':'application/json'},
+                         body: JSON.stringify({source_id: sid})});
+  await loadList();
+  if(active){
+    try { await openPage(active); }
+    catch(e){ active=null; pageEl.innerHTML = '<div class="empty">Page removed (no claims left).</div>'; }
+  }
 }
 
 function esc(s){ return (s||'').replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }

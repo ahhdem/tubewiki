@@ -112,6 +112,38 @@ def test_stickiness_and_dedup(stack):
     assert blocked.status == "skipped-evicted"
 
 
+def test_eviction_removes_source_and_is_sticky(stack):
+    import threading
+    from tubewiki.corpus import RejectedClaims
+    from tubewiki.curation import Curation
+
+    pipe, vault, corpus, ledger = stack
+    pipe.ingest(IngestRequest(video_id=VID1, title="Agentic Memory Explained", transcript=T1))
+    pipe.ingest(IngestRequest(video_id=VID2, title="Agentic Memory - Deep Dive", transcript=T2))
+    page = vault.read_page("agentic-memory")
+    evicted_texts = [c.text for c in page.claims if c.source_id == f"yt:{VID1}"]
+    assert evicted_texts
+
+    rejected = RejectedClaims(corpus.client, corpus.embedder)
+    cur = Curation(vault, corpus, ledger, rejected, threading.Lock())
+    res = cur.evict_source(f"yt:{VID1}")
+    assert res["claims_removed"] == len(evicted_texts)
+
+    # The page survives with only the other source's claims — surgical, not a page delete.
+    after = vault.read_page("agentic-memory")
+    assert after is not None
+    assert all(c.source_id != f"yt:{VID1}" for c in after.claims)
+    assert f"yt:{VID2}" in after.sources and f"yt:{VID1}" not in after.sources
+
+    # Sticky: the ledger marks it evicted and re-ingest is refused (§5.1).
+    assert ledger.is_evicted(VID1)
+    again = pipe.ingest(IngestRequest(video_id=VID1, title="x", transcript=T1))
+    assert again.status == "skipped-evicted"
+
+    # Rejected-claims collection remembers it (deterministic offline embedder → exact hit).
+    assert rejected.seen_similar(evicted_texts[0])
+
+
 def test_no_transcript_skips_and_logs(stack, monkeypatch):
     pipe, vault, _, ledger = stack
     # Simulate the backend fallback chain exhausting (no network dependence in the test).

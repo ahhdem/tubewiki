@@ -152,3 +152,45 @@ class Corpus:
                 must=[qm.FieldCondition(key="source_id", match=qm.MatchValue(value=source_id))]
             )),
         )
+
+
+class RejectedClaims:
+    """Separate vector collection answering 'have I rejected something like this before?'
+    (spec §6). Kept apart from the main corpus so it never pollutes wiki retrieval. Shares
+    the Qdrant client + embedder with the Corpus."""
+
+    COLLECTION = "rejected_claims"
+
+    def __init__(self, client: QdrantClient, embedder: Embedder):
+        self.client = client
+        self.embedder = embedder
+        existing = {c.name for c in client.get_collections().collections}
+        if self.COLLECTION not in existing:
+            client.create_collection(
+                collection_name=self.COLLECTION,
+                vectors_config=qm.VectorParams(size=embedder.dim, distance=qm.Distance.COSINE),
+            )
+
+    def add(self, texts: list[str]) -> int:
+        texts = [t for t in texts if t and t.strip()]
+        if not texts:
+            return 0
+        vecs = self.embedder.embed(texts)
+        points = [
+            qm.PointStruct(
+                id=int.from_bytes(hashlib.md5(t.encode()).digest()[:8], "big"),
+                vector=v, payload={"text": t},
+            )
+            for t, v in zip(texts, vecs)
+        ]
+        self.client.upsert(collection_name=self.COLLECTION, points=points)
+        return len(points)
+
+    def seen_similar(self, text: str, threshold: float = 0.9) -> bool:
+        if not text or not text.strip():
+            return False
+        vec = self.embedder.embed([text])[0]
+        res = self.client.query_points(
+            collection_name=self.COLLECTION, query=vec, limit=1, with_payload=False,
+        ).points
+        return bool(res) and res[0].score >= threshold

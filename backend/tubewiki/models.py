@@ -81,3 +81,10 @@ class IngestResult(BaseModel):
     claims_added: int = 0
     commit: Optional[str] = None
     detail: Optional[str] = None
+
+
+class EvictRequest(BaseModel):
+    """Evict a source by canonical source id (yt:<id>) or bare video_id."""
+
+    source_id: Optional[str] = None
+    video_id: Optional[str] = None
