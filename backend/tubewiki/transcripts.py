@@ -59,11 +59,24 @@ def _fetch_via_api(video_id: str) -> Optional[str]:
     except ImportError:
         return None
 
-    # 1.x instance API: list tracks, prefer manual → generated → any (translated).
-    try:
-        ytt = YouTubeTranscriptApi()
-        if hasattr(ytt, "list"):
-            tl = ytt.list(video_id)
+    api = YouTubeTranscriptApi()
+
+    # Primary: the plain instance .fetch(). This is the call that actually works on 1.x
+    # (the earlier list-first version left this as unreachable dead code and returned None
+    # even when .fetch() would have succeeded). Try en-preferred, then default.
+    if hasattr(api, "fetch"):
+        for kwargs in ({"languages": _LANGS}, {}):
+            try:
+                text = _snippets_to_text(api.fetch(video_id, **kwargs))
+                if text:
+                    return text
+            except Exception as e:  # noqa: BLE001
+                log.info("fetch(%s) failed for %s: %s", kwargs or "default", video_id, e)
+
+    # Fallback: list → manual/generated/translate (covers non-English-only videos).
+    if hasattr(api, "list"):
+        try:
+            tl = api.list(video_id)
             transcript = None
             for finder in ("find_manually_created_transcript", "find_generated_transcript"):
                 try:
@@ -73,21 +86,14 @@ def _fetch_via_api(video_id: str) -> Optional[str]:
                     continue
             if transcript is None:
                 for t in tl:  # any language; translate to en if the track allows it
-                    try:
-                        transcript = t.translate("en") if getattr(t, "is_translatable", False) else t
-                    except Exception:  # noqa: BLE001
-                        transcript = t
+                    transcript = t.translate("en") if getattr(t, "is_translatable", False) else t
                     break
             if transcript is not None:
                 text = _snippets_to_text(transcript.fetch())
                 if text:
                     return text
-        elif hasattr(ytt, "fetch"):
-            text = _snippets_to_text(ytt.fetch(video_id, languages=_LANGS))
-            if text:
-                return text
-    except Exception as e:  # noqa: BLE001
-        log.info("transcript-api (instance) failed for %s: %s", video_id, e)
+        except Exception as e:  # noqa: BLE001
+            log.info("transcript list-path failed for %s: %s", video_id, e)
 
     # Legacy static API (< 1.0)
     try:
