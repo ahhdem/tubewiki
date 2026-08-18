@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Fetch transcripts + basic metadata ONCE and cache them to JSON, so repeated
-ingests (tuning runs) never hit YouTube again — which is what trips 429/IP bans.
+"""Fetch transcripts + metadata and cache them to JSON — INCREMENTALLY (writes after
+every hit) and RESUMABLY (skips anything already in --out). So an interrupt or an IP
+block never loses progress: just re-run and it picks up where it left off.
 
-Run this from a residential IP for best hit-rate. Output feeds `ingest_cache.py`.
+Run with the project venv's Python (not conda base) from a residential IP:
 
-Usage:
-    python scripts/dump_transcripts.py --file urls.txt --out cache.json --delay 3
+    backend/.venv/bin/python scripts/dump_transcripts.py --file urls.txt --out cache.json --delay 4
 """
 from __future__ import annotations
 
@@ -35,13 +35,10 @@ def to_id(s: str) -> str | None:
 
 
 def oembed(video_id: str) -> tuple[str, str | None]:
-    """Title + channel via the lightweight oEmbed endpoint (rarely rate-limited)."""
     try:
-        r = httpx.get(
-            "https://www.youtube.com/oembed",
-            params={"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"},
-            timeout=15,
-        )
+        r = httpx.get("https://www.youtube.com/oembed",
+                      params={"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"},
+                      timeout=15)
         if r.status_code == 200:
             d = r.json()
             return d.get("title", video_id), d.get("author_name")
@@ -54,38 +51,55 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--file", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--delay", type=float, default=3.0)
+    ap.add_argument("--delay", type=float, default=4.0)
+    ap.add_argument("--stop-after-misses", type=int, default=5,
+                    help="bail after this many consecutive MISSes (likely an IP block)")
     args = ap.parse_args()
 
-    ids = [i for i in (to_id(x) for x in open(args.file).read().splitlines()) if i]
-    seen, hits, misses = set(), [], []
-    for i, vid in enumerate(ids, 1):
-        if vid in seen:
-            continue
-        seen.add(vid)
-        title, channel = oembed(vid)
-        transcript = None
-        for attempt in range(3):
-            try:
-                transcript = _fetch_via_api(vid)
-                break
-            except Exception as e:  # noqa: BLE001 — likely rate limit; back off
-                wait = args.delay * (attempt + 2)
-                print(f"  {vid}: retrying in {wait:.0f}s ({e})", file=sys.stderr)
-                time.sleep(wait)
-        if transcript:
-            hits.append({"video_id": vid, "title": title, "channel": channel,
-                         "transcript": transcript})
-            print(f"{i:2}/{len(ids)} {vid} OK {len(transcript)}c  {title[:50]}")
-        else:
-            misses.append(vid)
-            print(f"{i:2}/{len(ids)} {vid} MISS  {title[:50]}")
-        time.sleep(args.delay)
+    out_path = Path(args.out)
+    # Resume: keep whatever's already cached so we never re-fetch it.
+    hits: list[dict] = []
+    if out_path.exists():
+        try:
+            hits = json.loads(out_path.read_text() or "[]")
+        except Exception:  # noqa: BLE001
+            hits = []
+    done_ids = {h["video_id"] for h in hits}
 
-    Path(args.out).write_text(json.dumps(hits, indent=2))
-    print(f"\ncached {len(hits)} transcripts -> {args.out}")
+    ids = list(dict.fromkeys(i for i in (to_id(x) for x in open(args.file).read().splitlines()) if i))
+    todo = [i for i in ids if i not in done_ids]
+    print(f"{len(ids)} ids · {len(done_ids)} already cached · {len(todo)} to fetch")
+
+    def save() -> None:
+        out_path.write_text(json.dumps(hits, indent=2))
+
+    misses, consec = [], 0
+    try:
+        for i, vid in enumerate(todo, 1):
+            title, channel = oembed(vid)
+            transcript = _fetch_via_api(vid)
+            if transcript:
+                hits.append({"video_id": vid, "title": title, "channel": channel, "transcript": transcript})
+                save()  # <-- write NOW, not at the end
+                consec = 0
+                print(f"{i:2}/{len(todo)} {vid} OK {len(transcript)}c  {title[:46]}")
+            else:
+                misses.append(vid)
+                consec += 1
+                print(f"{i:2}/{len(todo)} {vid} MISS  {title[:46]}")
+                if consec >= args.stop_after_misses:
+                    print(f"\n{consec} MISSes in a row — likely IP-rate-limited. Stopping "
+                          f"(progress saved). Wait a while, then re-run the SAME command to resume.")
+                    break
+            time.sleep(args.delay)
+    except KeyboardInterrupt:
+        print("\ninterrupted — progress saved.")
+    finally:
+        save()
+
+    print(f"\ncached {len(hits)} transcripts total -> {out_path}")
     if misses:
-        print(f"misses (no transcript; whisper-backfill set): {' '.join(misses)}")
+        print(f"misses this run (no captions or blocked): {' '.join(misses)}")
     return 0
 
 
