@@ -53,6 +53,7 @@ def render_page(page: ConceptPage) -> str:
         "title": page.title,
         "slug": page.slug,
         "type": "concept",
+        "category": list(page.category),
         "created": page.created,
         "updated": page.updated,
         "sources": {
@@ -123,6 +124,7 @@ def parse_page(md: str) -> ConceptPage:
         title=fm.get("title", ""),
         slug=fm.get("slug", ""),
         summary="\n\n".join(summary_parts) or None,
+        category=list(fm.get("category") or []),
         claims=claims,
         sources=sources,
         created=fm.get("created", _now()),

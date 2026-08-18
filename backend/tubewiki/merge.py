@@ -46,12 +46,18 @@ def merge_video(
     corpus.add_video(sid, transcript, {"title": title, "channel": channel or ""})
 
     # 2. Pick the canonical concept, reusing an existing one where it fits (§7 preview).
-    existing_titles = [p.title for p in vault.list_pages()]
+    pages = vault.list_pages()
+    existing_titles = [p.title for p in pages]
     concept = llm.choose_concept(title, transcript, existing_titles)
     slug = slugify(concept)
 
     # 3. Load-or-create the concept page.
     page = vault.read_page(slug) or ConceptPage(title=concept, slug=slug)
+
+    # 3b. New page → place it in the category tree, reusing existing paths (§7.1).
+    if not page.category:
+        existing_paths = sorted({" / ".join(p.category) for p in pages if p.category})
+        page.category = llm.categorize(concept, transcript, existing_paths)
 
     # 4. Distil into claims and merge them with provenance.
     claim_texts = llm.extract_claims(title, transcript)

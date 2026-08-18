@@ -44,6 +44,8 @@ class ConceptPage(BaseModel):
     title: str
     slug: str
     summary: Optional[str] = None
+    # Shallow category path, broadest first, e.g. ["Technology", "AI"] (Phase 3, §7.1).
+    category: list[str] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)
     sources: dict[str, Source] = Field(default_factory=dict)
     created: str = Field(default_factory=_now)

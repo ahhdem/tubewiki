@@ -30,6 +30,7 @@ _MAX_CLAIMS = 8
 class LLM(Protocol):
     def choose_concept(self, title: str, transcript: str, existing_titles: list[str]) -> str: ...
     def extract_claims(self, title: str, transcript: str) -> list[str]: ...
+    def categorize(self, concept: str, transcript: str, existing_paths: list[str]) -> list[str]: ...
 
 
 def _clean_concept(title: str) -> str:
@@ -67,6 +68,10 @@ class TemplateLLM:
             if len(picked) >= _MAX_CLAIMS:
                 break
         return picked
+
+    def categorize(self, concept: str, transcript: str, existing_paths: list[str]) -> list[str]:
+        # Offline heuristic can't reason about domains; park everything under "General".
+        return ["General"]
 
 
 class OllamaLLM:
@@ -145,6 +150,28 @@ class OllamaLLM:
         except Exception as e:  # noqa: BLE001
             log.warning("claim extraction fell back to template: %s", e)
             return TemplateLLM().extract_claims(title, transcript)
+
+    def categorize(self, concept: str, transcript: str, existing_paths: list[str]) -> list[str]:
+        existing = "\n".join(f"- {p}" for p in existing_paths) or "(none yet)"
+        system = (
+            "You place a wiki topic into a shallow category tree. Output a path of 1-2 "
+            "levels, broadest first, formatted 'Top / Sub'. Rules:\n"
+            "- Each level is 1-2 words, Title Case, a BROAD domain (e.g. Technology, AI, "
+            "DevOps, Finance, Health, Science, Business).\n"
+            "- The top level must be very broad. Add a second level only if it groups "
+            "usefully; otherwise give just the top level.\n"
+            "- REUSE an existing path (or its prefix) VERBATIM whenever it fits.\n"
+            "Reply with ONLY the path, e.g. 'Technology / AI'."
+        )
+        user = f"Existing category paths:\n{existing}\n\nTopic: {concept}\n\nExcerpt:\n{transcript[:800]}"
+        try:
+            out = self._chat(system, user, temperature=0.0).splitlines()[0]
+            parts = [p.strip(" \t#*\"'`.") for p in out.split("/")]
+            parts = [p for p in parts if p][:2]
+            return parts or ["General"]
+        except Exception as e:  # noqa: BLE001
+            log.warning("categorize fell back to General for %r: %s", concept, e)
+            return ["General"]
 
 
 def make_llm(offline: bool) -> LLM:

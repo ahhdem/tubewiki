@@ -65,8 +65,8 @@ def build_app() -> FastAPI:
     @app.get("/api/pages")
     def list_pages() -> list[dict]:
         return [
-            {"title": p.title, "slug": p.slug, "sources": len(p.sources),
-             "claims": len(p.claims), "updated": p.updated}
+            {"title": p.title, "slug": p.slug, "category": p.category,
+             "sources": len(p.sources), "claims": len(p.claims), "updated": p.updated}
             for p in sorted(vault.list_pages(), key=lambda x: x.updated, reverse=True)
         ]
 
@@ -77,7 +77,7 @@ def build_app() -> FastAPI:
             raise HTTPException(404, "no such page")
         return {
             "title": page.title, "slug": page.slug, "summary": page.summary,
-            "updated": page.updated,
+            "category": page.category, "updated": page.updated,
             "claims": [{"id": c.id, "text": c.text, "source_id": c.source_id} for c in page.claims],
             "sources": {sid: s.model_dump() for sid, s in page.sources.items()},
             "markdown": render_page(page),
@@ -85,7 +85,8 @@ def build_app() -> FastAPI:
 
     @app.get("/api/search")
     def search(q: str) -> list[dict]:
-        return [{"title": p.title, "slug": p.slug, "claims": len(p.claims)}
+        return [{"title": p.title, "slug": p.slug, "category": p.category,
+                 "sources": len(p.sources), "claims": len(p.claims)}
                 for p in vault.search(q)]
 
     @app.get("/")

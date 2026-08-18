@@ -19,11 +19,16 @@
   .wrap { display:grid; grid-template-columns:300px 1fr; height:calc(100vh - 51px); }
   aside { border-right:1px solid var(--line); overflow:auto; padding:10px; }
   main { overflow:auto; padding:26px 34px; max-width:820px; }
+  .group { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted);
+           padding:14px 11px 4px; font-weight:700; }
   .item { padding:9px 11px; border-radius:8px; cursor:pointer; }
   .item:hover { background:var(--panel); }
   .item.active { background:var(--panel); outline:1px solid var(--line); }
   .item .t { font-weight:600; }
   .item .m { color:var(--muted); font-size:12px; }
+  .item .m .sub { color:var(--accent); }
+  .crumb { color:var(--muted); font-size:12px; margin-bottom:8px; }
+  .crumb b { color:var(--ink); font-weight:600; }
   h2.page-title { margin:0 0 4px; }
   .page-meta { color:var(--muted); font-size:13px; margin-bottom:20px; }
   .claim { position:relative; padding:2px 0; }
@@ -68,16 +73,32 @@ async function loadHealth(){
   } catch(e){ modeEl.textContent = 'backend unreachable'; }
 }
 
+function groupByCategory(items){
+  const groups = {};
+  for(const p of items){
+    const top = (p.category && p.category[0]) || 'Uncategorized';
+    (groups[top] = groups[top] || []).push(p);
+  }
+  return Object.entries(groups).sort((a,b)=> a[0].localeCompare(b[0]));
+}
+
 async function loadList(items){
   items = items || await j('/api/pages');
   if(!items.length){ listEl.innerHTML = '<div class="empty">No pages yet.</div>'; return; }
   listEl.innerHTML = '';
-  for(const p of items){
-    const d = document.createElement('div');
-    d.className = 'item' + (p.slug===active ? ' active':'');
-    d.innerHTML = `<div class="t">${esc(p.title)}</div><div class="m">${p.claims||0} claims · ${p.sources||0} sources</div>`;
-    d.onclick = ()=>openPage(p.slug);
-    listEl.appendChild(d);
+  for(const [top, pages] of groupByCategory(items)){
+    const h = document.createElement('div'); h.className='group'; h.textContent = top;
+    listEl.appendChild(h);
+    pages.sort((a,b)=> ((a.category&&a.category[1])||'').localeCompare((b.category&&b.category[1])||'')
+                       || a.title.localeCompare(b.title));
+    for(const p of pages){
+      const d = document.createElement('div');
+      d.className = 'item' + (p.slug===active ? ' active':'');
+      const sub = (p.category && p.category[1]) ? `<span class="sub">${esc(p.category[1])}</span> · ` : '';
+      d.innerHTML = `<div class="t">${esc(p.title)}</div><div class="m">${sub}${p.claims||0} claims · ${p.sources||0} sources</div>`;
+      d.onclick = ()=>openPage(p.slug);
+      listEl.appendChild(d);
+    }
   }
 }
 
@@ -104,7 +125,10 @@ async function openPage(slug){
   const refs = Object.entries(p.sources).map(([sid,s],i)=>
     `<li>${i+1}. <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`+
     `${s.channel?' · '+esc(s.channel):''} <code>${esc(sid)}</code></li>`).join('');
+  const path = (p.category||[]).map(esc);
+  const crumb = path.length ? `<div class="crumb">${path.join(' › ')} › <b>${esc(p.title)}</b></div>` : '';
   pageEl.innerHTML =
+    crumb +
     `<h2 class="page-title">${esc(p.title)}</h2>`+
     `<div class="page-meta">updated ${esc(p.updated)}</div>`+
     (p.summary?`<p>${esc(p.summary)}</p>`:'')+ claims +
